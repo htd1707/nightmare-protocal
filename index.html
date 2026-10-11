@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A first-person survival horror game that runs in your browser.">
+<title>Nightmare Protocol</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Stencil+Display:wght@500;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500&display=swap">
+<style>
+/* Layout: full-bleed WebGL canvas; all UI floats over it, menus anchored bottom-left like a facility terminal. Single committed dark look. */
+:root {
+  --ink: #07090a; --panel: rgba(9, 12, 12, 0.86); --bone: #cdd3c6; --dim: #7b867e; --faint: rgba(205, 211, 198, 0.14);
+  --sick: #9fd39a; --alarm: #d2402f; --amber: #e2b45c;
+  --f-display: 'Big Shoulders Stencil Display', Impact, 'Arial Narrow', sans-serif;
+  --f-mono: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+  --f-body: 'IBM Plex Sans Condensed', 'Arial Narrow', system-ui, sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; margin: 0; background: var(--ink); color: var(--bone); overflow: hidden; }
+body { font-family: var(--f-body); font-size: 15px; -webkit-font-smoothing: antialiased; user-select: none; }
+#view, #view canvas { position: fixed; inset: 0; width: 100% !important; height: 100% !important; display: block; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 1px solid var(--sick); outline-offset: 3px; }
+.screen { position: fixed; inset: 0; z-index: 20; }
+.label { font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); }
+
+/* ---------- loading ---------- */
+#scr-loading { display: grid; place-items: center; background: var(--ink); }
+#scr-loading .box { width: min(420px, 100% - 32px); display: grid; gap: 14px; }
+#scr-loading h1 { font-family: var(--f-display); font-weight: 800; font-size: clamp(34px, 6vw, 54px); letter-spacing: 0.04em; margin: 0; line-height: 0.95; }
+#load-bar { height: 2px; background: var(--faint); overflow: hidden; }
+#load-bar i { display: block; height: 100%; background: var(--sick); transform-origin: left; transform: scaleX(0); transition: transform 0.3s; }
+#load-txt { font-family: var(--f-mono); font-size: 12px; color: var(--dim); min-height: 1.4em; }
+
+/* ---------- main menu ---------- */
+#scr-menu { background: linear-gradient(90deg, rgba(4,6,7,0.92) 0%, rgba(4,6,7,0.55) 42%, rgba(4,6,7,0) 70%), linear-gradient(0deg, rgba(4,6,7,0.8), rgba(4,6,7,0) 40%); }
+.menu-col { position: absolute; left: max(16px, 6vw); bottom: max(28px, 9vh); width: min(560px, 100% - 32px); display: grid; gap: 28px; }
+.title { margin: 0; font-family: var(--f-display); font-weight: 800; line-height: 0.82; font-size: clamp(56px, 10.5vw, 132px); letter-spacing: 0.01em; text-wrap: balance; color: var(--bone); text-shadow: 0 0 40px rgba(159, 211, 154, 0.08); }
+.title span { display: block; }
+.title .flk { animation: flk 7s infinite steps(1); }
+@keyframes flk { 0%, 61%, 63%, 88%, 100% { opacity: 1; } 62%, 89% { opacity: 0.25; } }
+.sub-id { font-family: var(--f-mono); font-size: 12px; letter-spacing: 0.16em; color: var(--dim); text-transform: uppercase; }
+.menu { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.mi { display: flex; align-items: baseline; gap: 14px; width: 100%; text-align: left; padding: 7px 0 7px 18px; position: relative; font-family: var(--f-display); font-weight: 700; font-size: 28px; letter-spacing: 0.06em; color: var(--bone); opacity: 0.78; transition: opacity 0.15s, padding 0.2s; }
+.mi::before { content: ''; position: absolute; left: 0; top: 50%; width: 6px; height: 2px; background: var(--alarm); transform: translateY(-50%) scaleX(0); transform-origin: left; transition: transform 0.2s; }
+.mi:hover:not(:disabled), .mi:focus-visible { opacity: 1; padding-left: 26px; }
+.mi:hover:not(:disabled)::before, .mi:focus-visible::before { transform: translateY(-50%) scaleX(2.4); }
+.mi small { font-family: var(--f-mono); font-weight: 400; font-size: 11px; letter-spacing: 0.08em; color: var(--dim); text-transform: uppercase; }
+.mi:disabled { opacity: 0.3; cursor: default; }
+.ticker-wrap { position: absolute; right: max(16px, 4vw); bottom: max(28px, 9vh); max-width: min(360px, 40vw); text-align: right; display: grid; gap: 6px; }
+#ticker { font-family: var(--f-mono); font-size: 12px; color: var(--alarm); letter-spacing: 0.06em; }
+#ticker.in { animation: tin 0.6s ease-out; }
+@keyframes tin { from { opacity: 0; transform: translateY(4px); } }
+.rec { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--alarm); margin-right: 6px; animation: blink 1.4s infinite; vertical-align: 1px; }
+@keyframes blink { 50% { opacity: 0.15; } }
+@media (max-width: 720px) { .ticker-wrap { display: none; } }
+
+/* ---------- panels (settings / credits / pause / death / ending) ---------- */
+.panel-screen { background: rgba(3, 5, 6, 0.82); backdrop-filter: blur(2px); display: grid; place-items: center; padding-inline: 16px; overflow-y: auto; }
+.panel { width: min(640px, 100%); display: grid; gap: 22px; padding-block: 32px; }
+.panel h2 { margin: 0; font-family: var(--f-display); font-weight: 800; font-size: clamp(40px, 6vw, 64px); line-height: 0.9; letter-spacing: 0.03em; text-wrap: balance; }
+.panel p { margin: 0; line-height: 1.55; color: var(--bone); max-width: 62ch; }
+.rows { display: grid; gap: 0; border-top: 1px solid var(--faint); }
+.row { display: grid; grid-template-columns: 150px 1fr auto; align-items: center; gap: 16px; padding: 11px 0; border-bottom: 1px solid var(--faint); min-width: 0; }
+.row > span:first-child { font-family: var(--f-mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
+.row output { font-family: var(--f-mono); font-size: 12px; color: var(--bone); min-width: 5ch; text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) { .row { grid-template-columns: 1fr auto; } .row > span:first-child { grid-column: 1 / -1; } }
+input[type=range] { width: 100%; accent-color: var(--sick); }
+input[type=checkbox] { accent-color: var(--sick); width: 18px; height: 18px; }
+.segc { display: inline-flex; border: 1px solid var(--faint); }
+.segc button { padding: 6px 12px; font-family: var(--f-mono); font-size: 12px; letter-spacing: 0.08em; color: var(--dim); text-transform: uppercase; }
+.segc button[aria-pressed=true] { background: var(--bone); color: var(--ink); }
+.btns { display: flex; flex-wrap: wrap; gap: 10px 24px; }
+.btn { font-family: var(--f-display); font-weight: 700; font-size: 22px; letter-spacing: 0.08em; padding: 6px 0; border-bottom: 2px solid transparent; opacity: 0.85; }
+.btn:hover, .btn:focus-visible { opacity: 1; border-color: var(--alarm); }
+.btn.ghost { color: var(--dim); }
+.keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 20px; font-family: var(--f-mono); font-size: 12px; color: var(--dim); }
+.keys b { color: var(--bone); font-weight: 500; display: inline-block; min-width: 64px; }
+#scr-death { background: radial-gradient(ellipse at center, rgba(40, 4, 3, 0.55), rgba(2, 2, 2, 0.96) 70%); }
+#scr-death h2 { color: var(--alarm); font-size: clamp(64px, 12vw, 140px); letter-spacing: 0.05em; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 16px; border-top: 1px solid var(--faint); padding-top: 16px; }
+.stats div { display: grid; gap: 4px; }
+.stats b { font-family: var(--f-display); font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+#scr-ending { background: #e9ebe4; color: #121412; }
+#scr-ending .label, #scr-ending .btn.ghost { color: #59605a; }
+#scr-ending .stats, #scr-ending .rows { border-color: rgba(18, 20, 18, 0.15); }
+#scr-ending p { color: #1d201d; }
+#scr-ending .btn:hover { border-color: #121412; }
+
+/* ---------- HUD ---------- */
+#hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
+#cross { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: rgba(205, 211, 198, 0.55); transition: all 0.15s; }
+#cross.on { width: 18px; height: 18px; margin: -9px 0 0 -9px; background: transparent; border: 1px solid rgba(205, 211, 198, 0.7); }
+#prompt { position: absolute; left: 50%; top: calc(50% + 26px); transform: translateX(-50%); display: flex; gap: 10px; align-items: center; opacity: 0; transition: opacity 0.12s; white-space: nowrap; }
+#prompt.on { opacity: 1; }
+#prompt kbd { font-family: var(--f-mono); font-size: 12px; border: 1px solid rgba(205,211,198,0.6); padding: 1px 6px; color: var(--bone); }
+#prompt .t { font-family: var(--f-mono); font-size: 13px; letter-spacing: 0.04em; color: var(--bone); text-shadow: 0 1px 3px #000; }
+#objective { position: absolute; left: 24px; top: calc(20px + env(safe-area-inset-top, 0px)); max-width: min(420px, 100% - 48px); display: grid; gap: 4px; transition: opacity 0.4s, transform 0.4s; }
+#objective .txt { font-family: var(--f-display); font-weight: 700; font-size: 22px; letter-spacing: 0.04em; line-height: 1.05; text-shadow: 0 2px 6px #000; }
+#objective .sub { font-family: var(--f-mono); font-size: 12px; line-height: 1.5; color: var(--dim); text-shadow: 0 1px 3px #000; }
+#objective.min .sub { display: none; }
+#objective.min { opacity: 0.45; }
+#objective.flash .txt { animation: objf 1.6s ease-out; }
+@keyframes objf { 0% { color: var(--amber); } 100% { color: var(--bone); } }
+#location { position: absolute; left: 50%; top: 18%; transform: translateX(-50%); text-align: center; opacity: 0; display: grid; gap: 6px; }
+#location.on { animation: loc 4.2s ease-in-out; }
+@keyframes loc { 0% { opacity: 0; letter-spacing: 0.3em; } 15%, 75% { opacity: 1; letter-spacing: 0.14em; } 100% { opacity: 0; } }
+#location .n { font-family: var(--f-display); font-weight: 800; font-size: clamp(28px, 4vw, 44px); letter-spacing: 0.14em; text-shadow: 0 2px 12px #000; }
+#location .s { font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.2em; color: var(--dim); text-transform: uppercase; }
+#battery { position: absolute; left: 24px; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); display: flex; align-items: center; gap: 10px; }
+#battery .cell { display: flex; gap: 3px; padding: 3px; border: 1px solid rgba(205,211,198,0.45); position: relative; }
+#battery .cell::after { content: ''; position: absolute; right: -5px; top: 4px; width: 3px; height: 6px; background: rgba(205,211,198,0.45); }
+#battery .seg { width: 8px; height: 10px; background: rgba(205,211,198,0.1); }
+#battery .seg.on { background: var(--bone); }
+#battery .seg.on.low { background: var(--alarm); animation: blink 0.8s infinite; }
+#battery.off .seg.on { background: rgba(205,211,198,0.35); }
+#battery .spare { font-family: var(--f-mono); font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+#stamina { position: absolute; left: 50%; bottom: calc(26px + env(safe-area-inset-bottom, 0px)); width: 180px; height: 2px; margin-left: -90px; background: rgba(205,211,198,0.1); opacity: 0; transition: opacity 0.5s; }
+#stamina.on { opacity: 1; }
+#stamina i { display: block; height: 100%; background: rgba(205,211,198,0.75); transform-origin: center; }
+#stamina.ex i { background: var(--alarm); }
+#toast { position: absolute; left: 50%; bottom: calc(118px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); font-family: var(--f-mono); font-size: 13px; color: var(--bone); background: rgba(5,7,8,0.7); padding: 7px 14px; opacity: 0; transition: opacity 0.3s; max-width: calc(100% - 32px); text-align: center; }
+#toast.on { opacity: 1; }
+#subtitle { position: absolute; left: 50%; bottom: calc(64px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(760px, 100% - 32px); text-align: center; font-size: 17px; line-height: 1.45; color: #e8ece2; text-shadow: 0 1px 4px #000, 0 0 12px #000; opacity: 0; transition: opacity 0.4s; }
+#subtitle.on { opacity: 1; }
+#subtitle b { font-family: var(--f-mono); font-size: 12px; letter-spacing: 0.14em; color: var(--amber); margin-right: 6px; font-weight: 500; }
+#timer { position: absolute; right: 24px; top: calc(18px + env(safe-area-inset-top, 0px)); font-family: var(--f-display); font-size: 54px; font-weight: 800; color: var(--amber); font-variant-numeric: tabular-nums; text-shadow: 0 2px 10px #000; }
+#timer.crit { color: var(--alarm); animation: blink 0.5s infinite; }
+#hidevig { position: absolute; left: 50%; bottom: calc(150px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.2em; color: var(--dim); }
+
+/* ---------- modal readers ---------- */
+.modal { position: fixed; inset: 0; z-index: 15; display: grid; place-items: center; background: rgba(2,3,3,0.72); padding-inline: 16px; }
+#doc .sheet { width: min(560px, 100%); max-height: 82vh; overflow-y: auto; background: #d9d3c1; color: #1b1a17; padding: 30px 32px 26px; box-shadow: 0 30px 80px rgba(0,0,0,0.6); transform: rotate(-0.6deg); display: grid; gap: 12px; }
+#doc .tag { font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #8b2a22; }
+#doc h2 { margin: 0; font-family: var(--f-display); font-weight: 800; font-size: 32px; line-height: 0.95; text-wrap: balance; }
+#doc .body { font-family: var(--f-mono); font-size: 14px; line-height: 1.6; white-space: pre-wrap; max-width: 62ch; }
+#doc .close { font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.14em; color: #6b665a; text-transform: uppercase; }
+#keypad .pad { width: 260px; max-width: 100%; background: #16191a; border: 1px solid #2d3234; padding: 18px; display: grid; gap: 12px; box-shadow: 0 30px 80px rgba(0,0,0,0.6); }
+#keypad .disp { font-family: var(--f-mono); font-size: 28px; letter-spacing: 0.2em; text-align: center; padding: 10px; background: #050807; color: var(--sick); border: 1px solid #222; font-variant-numeric: tabular-nums; }
+#keypad .disp.ok { color: #7fe08a; } #keypad .disp.bad { color: var(--alarm); animation: shake 0.3s; }
+@keyframes shake { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+#keypad .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+#keypad .grid button { font-family: var(--f-mono); font-size: 20px; padding: 10px 0; background: #24292b; border-bottom: 3px solid #0c0e0f; color: var(--bone); }
+#keypad .grid button.hit, #keypad .grid button:active { background: #3a4245; transform: translateY(2px); border-bottom-width: 1px; }
+#keypad .hint, #terminal .hint { font-family: var(--f-mono); font-size: 11px; color: var(--dim); text-align: center; letter-spacing: 0.06em; }
+#terminal .crt { width: min(620px, 100%); background: #020604; border: 1px solid #1d2a22; padding: 22px; font-family: var(--f-mono); color: #7fe0a0; font-size: 14px; line-height: 1.6; box-shadow: 0 0 60px rgba(60, 220, 120, 0.08), 0 30px 80px rgba(0,0,0,0.7); display: grid; gap: 10px; }
+#terminal .log { white-space: pre-wrap; min-height: 6em; }
+#terminal .line::before { content: 'PASSWORD > '; color: #4a8f62; }
+#terminal .in::after { content: '█'; animation: blink 1s infinite steps(1); }
+#ctxlost { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: var(--ink); text-align: center; padding-inline: 16px; }
+@media (prefers-reduced-motion: reduce) { .title .flk, .rec, #ticker.in, #location.on, #battery .seg.on.low, #timer.crit { animation: none; } #location.on { opacity: 1; } }
+</style>
+</head>
+<body>
+<div id="view"></div>
+
+<!-- HUD -->
+<div id="hud" hidden>
+  <div id="cross"></div>
+  <div id="prompt"><kbd>E</kbd><span class="t"></span></div>
+  <div id="objective"><span class="label">Objective · Tab</span><div class="txt"></div><div class="sub"></div></div>
+  <div id="location"><div class="n"></div><div class="s"></div></div>
+  <div id="battery" hidden><div class="cell"><i class="seg"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i></div><span class="spare">× 0</span></div>
+  <div id="stamina"><i></i></div>
+  <div id="toast"></div>
+  <div id="subtitle"></div>
+  <div id="timer" hidden></div>
+  <div id="hidevig" hidden>HIDING — PRESS E TO LEAVE</div>
+</div>
+
+<!-- readers -->
+<div id="doc" class="modal" hidden><div class="sheet"><span class="tag"></span><h2></h2><div class="body"></div><span class="close">E or Esc to put it down</span></div></div>
+<div id="keypad" class="modal" hidden><div class="pad"><span class="label">Research Lab · Door Code</span><div class="disp">— — — —</div>
+  <div class="grid"><button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button><button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button><button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button><button data-k="C">C</button><button data-k="0">0</button><button data-k="<">⌫</button></div>
+  <div class="hint">Type digits on your keyboard · Esc to step away</div></div></div>
+<div id="terminal" class="modal" hidden><div class="crt"><div class="log"></div><div class="line"><span class="in"></span></div><div class="hint">Type the password and press Enter · Esc to log off</div></div></div>
+
+<!-- screens -->
+<section id="scr-loading" class="screen">
+  <div class="box"><span class="label">Hale Institute · Sub-level 4</span><h1>NIGHTMARE<br>PROTOCOL</h1><div id="load-bar"><i></i></div><div id="load-txt">Starting…</div></div>
+</section>
+
+<section id="scr-menu" class="screen" hidden>
+  <div class="menu-col">
+    <div class="sub-id">Hale Institute for Sleep Research · Sub-level 4</div>
+    <h1 class="title"><span>NIGHT<span class="flk">M</span>ARE</span><span>PROTOCOL</span></h1>
+    <div class="menu">
+      <button class="mi" data-act="new">NEW GAME</button>
+      <button class="mi" data-act="continue">CONTINUE <small>No saved checkpoint</small></button>
+      <button class="mi" data-act="settings">SETTINGS</button>
+      <button class="mi" data-act="credits">CREDITS</button>
+    </div>
+  </div>
+  <div class="ticker-wrap"><span class="label"><span class="rec"></span>Emergency broadcast</span><div id="ticker" class="in">EMERGENCY BROADCAST 03:12 — ALL STAFF EVACUATE SUB-LEVEL 4</div></div>
+</section>
+
+<section id="scr-settings" class="screen panel-screen" hidden>
+  <div class="panel">
+    <h2>Settings</h2>
+    <div class="rows">
+      <div class="row"><span>Graphics</span><div class="segc" id="set-quality"><button data-q="low">Low</button><button data-q="medium">Medium</button><button data-q="high">High</button><button data-q="ultra">Ultra</button></div><span></span></div>
+      <div class="row"><span>Mouse sensitivity</span><input id="set-sens" type="range" min="0.2" max="3" step="0.05"><output id="set-sens-v"></output></div>
+      <div class="row"><span>Field of view</span><input id="set-fov" type="range" min="60" max="95" step="1"><output id="set-fov-v"></output></div>
+      <div class="row"><span>Brightness</span><input id="set-bright" type="range" min="0.7" max="1.6" step="0.05"><output id="set-bright-v"></output></div>
+      <div class="row"><span>Master volume</span><input id="set-vol" type="range" min="0" max="1" step="0.05"><output id="set-vol-v"></output></div>
+      <div class="row"><span>Music</span><input id="set-mus" type="range" min="0" max="1" step="0.05"><output id="set-mus-v"></output></div>
+      <div class="row"><span>Invert mouse Y</span><span></span><input id="set-invert" type="checkbox"></div>
+      <div class="row"><span>Head bob</span><span></span><input id="set-bob" type="checkbox"></div>
+      <div class="row"><span>Subtitles</span><span></span><input id="set-subs" type="checkbox"></div>
+      <div class="row"><span>Display</span><span></span><button id="set-fs" class="btn ghost" style="font-size:16px">Toggle fullscreen</button></div>
+    </div>
+    <div class="keys"><span><b>WASD</b>Move</span><span><b>Mouse</b>Look</span><span><b>Shift</b>Sprint</span><span><b>Ctrl / C</b>Crouch</span><span><b>E</b>Interact · hide</span><span><b>F</b>Flashlight</span><span><b>R</b>Swap batteries</span><span><b>Tab</b>Objective</span><span><b>Esc</b>Pause</span></div>
+    <div class="btns"><button class="btn" data-act="back">Back</button></div>
+  </div>
+</section>
+
+<section id="scr-credits" class="screen panel-screen" hidden>
+  <div class="panel">
+    <h2>Credits</h2>
+    <p>Nightmare Protocol is built entirely in the browser with Three.js and the Web Audio API. Every surface, model, light, sound and piece of music is generated in code at load time. No recorded audio or downloaded art is used.</p>
+    <p>Wear headphones. Play in the dark. If you hear it running, it has already seen you.</p>
+    <div class="btns"><button class="btn" data-act="back">Back</button></div>
+  </div>
+</section>
+
+<section id="scr-pause" class="screen panel-screen" hidden>
+  <div class="panel">
+    <span class="label">Paused</span>
+    <h2 id="pause-obj">—</h2>
+    <p id="inv" style="font-family:var(--f-mono);font-size:13px;color:var(--dim)"></p>
+    <div class="btns"><button class="btn" data-act="resume">Resume</button><button class="btn ghost" data-act="settings">Settings</button><button class="btn ghost" data-act="restartcp">Restart checkpoint</button><button class="btn ghost" data-act="menu">Main menu</button></div>
+  </div>
+</section>
+
+<section id="scr-death" class="screen panel-screen" hidden>
+  <div class="panel">
+    <h2>GAME OVER</h2>
+    <p>It found you. Last checkpoint: <span id="death-cp">Recovery Room</span>.</p>
+    <div class="btns"><button class="btn" data-act="restartcp">Restart checkpoint</button><button class="btn ghost" data-act="restart">Restart game</button><button class="btn ghost" data-act="menu">Main menu</button></div>
+  </div>
+</section>
+
+<section id="scr-ending" class="screen panel-screen" hidden>
+  <div class="panel">
+    <span class="label">Surface access · 05:47</span>
+    <h2>You climb into the grey morning.</h2>
+    <p>The broadcast was never a call for help. It was a recall. Somewhere beneath you, eleven anchors sleep, and the one who remembers is walking home.</p>
+    <p>It always follows the one who remembers.</p>
+    <div class="stats"><div><span class="label">Time</span><b id="end-time">0:00</b></div><div><span class="label">Deaths</span><b id="end-deaths">0</b></div><div><span class="label">Scares witnessed</span><b id="end-scares">0</b></div><div><span class="label">Records found</span><b id="end-docs">0</b></div></div>
+    <div class="btns"><button class="btn" data-act="restart">Play again</button><button class="btn ghost" data-act="menu">Main menu</button></div>
+  </div>
+</section>
+
+<div id="ctxlost" hidden><div class="panel" style="text-align:left"><h2>The screen went dark.</h2><p>The browser dropped the graphics context, often after the GPU driver resets or the tab sat in the background. Reload the page to continue from your last checkpoint.</p></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="js/core.js"></script>
+<script src="js/textures.js"></script>
+<script src="js/level.js"></script>
+<script src="js/props.js"></script>
+<script src="js/player.js"></script>
+<script src="js/creature.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/fx.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/world.js"></script>
+<script src="js/scares.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/game.js"></script>
+<script>
+  (function start() {
+    if (!window.THREE) { document.getElementById('load-txt').textContent = 'Could not load Three.js from cdnjs. Check your connection and reload.'; return; }
+    const go = () => NP.Game.boot().catch((e) => { console.error(e); });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(go, go); else go();
+  })();
+</script>
+</body>
+</html>
